@@ -11,6 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="mobile-web-app-capable" content="yes">
 
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
@@ -704,6 +705,7 @@ function loadDB(){
 function saveDB(){
   localStorage.setItem(DB_KEY, JSON.stringify(DB));
 }
+function touchSession(s){ if(s) s.updatedAt = Date.now(); }
 let DB = loadDB();
 
 const THEME_KEY = 'sajjeli_theme_v1';
@@ -1048,7 +1050,7 @@ function getOrCreateSession(classId, date, seq){
   seq = seq || 1;
   let s = DB.sessions.find(x=>x.classId===classId && x.date===date && (x.seq||1)===seq);
   if(!s){
-    s = { id:uid(), classId, date, seq, records:{} };
+    s = { id:uid(), classId, date, seq, records:{}, createdAt: Date.now(), updatedAt: Date.now() };
     const c = DB.classes.find(x=>x.id===classId);
     if(c){
       c.students.forEach(stu=>{ s.records[stu.id] = { status:'present' }; });
@@ -2479,7 +2481,7 @@ function handleAction(action, el, e){
       } else {
         s.records[sid].status = 'present';
       }
-      saveDB(); render();
+      touchSession(s); saveDB(); render();
       break;
     }
     case 'toggleLate': {
@@ -2492,7 +2494,7 @@ function handleAction(action, el, e){
       if(!currentlyLate){
         s.records[sid].status = 'present';
       }
-      saveDB(); render();
+      touchSession(s); saveDB(); render();
       break;
     }
     case 'setHw': {
@@ -2502,7 +2504,7 @@ function handleAction(action, el, e){
       const cur = s.records[sid].hw || null;
       // cycle: empty -> yes (✓) -> no (✕) -> empty
       s.records[sid].hw = cur === null ? 'yes' : (cur === 'yes' ? 'no' : null);
-      saveDB();
+      touchSession(s); saveDB();
       route.expandedStudent = sid;
       render();
       break;
@@ -2513,7 +2515,7 @@ function handleAction(action, el, e){
       s.records[sid] = s.records[sid] || {};
       const current = s.records[sid].hasBook !== false;
       s.records[sid].hasBook = !current;
-      saveDB();
+      touchSession(s); saveDB();
       route.expandedStudent = sid;
       render();
       break;
@@ -2524,7 +2526,7 @@ function handleAction(action, el, e){
       s.records[sid] = s.records[sid] || {};
       const current = s.records[sid].hasNotebook !== false;
       s.records[sid].hasNotebook = !current;
-      saveDB();
+      touchSession(s); saveDB();
       route.expandedStudent = sid;
       render();
       break;
@@ -2535,7 +2537,7 @@ function handleAction(action, el, e){
       s.records[sid] = s.records[sid] || {};
       const current = s.records[sid].isFocused !== false;
       s.records[sid].isFocused = !current;
-      saveDB();
+      touchSession(s); saveDB();
       route.expandedStudent = sid;
       render();
       break;
@@ -2550,8 +2552,8 @@ function handleAction(action, el, e){
     case 'viewHistory': nav({screen:'history', classId:el.getAttribute('data-id')}); break;
     case 'openSessionDate': nav({screen:'session', classId:el.getAttribute('data-id'), date:el.getAttribute('data-date'), seq:parseInt(el.getAttribute('data-seq'))||1}); break;
 
-    case 'exportAll': exportBackup(); break;
-    case 'importBackup': document.getElementById('fileImport').click(); break;
+    case 'exportAll': driveExport(); break;
+    case 'importBackup': driveImport(); break;
 
     case 'triggerImport': {
       const fi = document.getElementById('fileImportStudents');
@@ -3012,6 +3014,159 @@ fileImport.type='file'; fileImport.accept='application/json'; fileImport.id='fil
 fileImport.style.display='none';
 fileImport.addEventListener('change', (e)=>{ if(e.target.files[0]) importBackupFile(e.target.files[0]); });
 document.body.appendChild(fileImport);
+
+/* ============================================================
+   Google Drive Sync
+   ============================================================ */
+const GDRIVE_CLIENT_ID = '659728994809-026peo4qlvr18pskbikeufbv8rp23s27.apps.googleusercontent.com';
+const GDRIVE_SCOPES = 'https://www.googleapis.com/auth/drive.file';
+const GDRIVE_FILE_NAME = 'rasd-backup.json';
+const GDRIVE_LAST_SYNC_KEY = 'rasd_last_sync';
+
+let gAccessToken = null;
+
+function getLastSync(){ return parseFloat(localStorage.getItem(GDRIVE_LAST_SYNC_KEY)||'0'); }
+function setLastSync(ts){ localStorage.setItem(GDRIVE_LAST_SYNC_KEY, String(ts)); }
+
+function gSignIn(callback){
+  if(gAccessToken){ callback(gAccessToken); return; }
+  const client = google.accounts.oauth2.initTokenClient({
+    client_id: GDRIVE_CLIENT_ID,
+    scope: GDRIVE_SCOPES,
+    callback: (resp) => {
+      if(resp.error){ showToast('فشل تسجيل الدخول بـ Google'); return; }
+      gAccessToken = resp.access_token;
+      callback(gAccessToken);
+    }
+  });
+  client.requestAccessToken();
+}
+
+async function gFindFile(token){
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=name='${GDRIVE_FILE_NAME}'+and+trashed=false&fields=files(id,name,modifiedTime)`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const data = await res.json();
+  return data.files && data.files.length > 0 ? data.files[0] : null;
+}
+
+async function gReadFile(token, fileId){
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return await res.json();
+}
+
+async function gWriteFile(token, fileId, data){
+  const body = JSON.stringify(data);
+  const url = fileId
+    ? `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`
+    : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`;
+
+  if(fileId){
+    await fetch(url, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body
+    });
+  } else {
+    const metadata = { name: GDRIVE_FILE_NAME, mimeType: 'application/json' };
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    form.append('file', new Blob([body], { type: 'application/json' }));
+    await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form
+    });
+  }
+}
+
+async function driveExport(){
+  showToast('جاري تسجيل الدخول...');
+  gSignIn(async (token) => {
+    try {
+      showToast('جاري الرفع...');
+      const lastSync = getLastSync();
+
+      // Get new/changed sessions since last sync
+      const newSessions = DB.sessions.filter(s => {
+        const ts = s.updatedAt || s.createdAt || 0;
+        return ts > lastSync;
+      });
+
+      // Find existing file
+      const existingFile = await gFindFile(token);
+      let remoteDB = { classes: [], sessions: [] };
+
+      if(existingFile){
+        remoteDB = await gReadFile(token, existingFile.id);
+      }
+
+      // Merge: update existing sessions or add new ones
+      const sessionMap = {};
+      (remoteDB.sessions || []).forEach(s => { sessionMap[s.id] = s; });
+      
+      // Always sync all classes (lightweight)
+      remoteDB.classes = DB.classes;
+
+      // Merge new/updated sessions
+      newSessions.forEach(s => { sessionMap[s.id] = s; });
+      remoteDB.sessions = Object.values(sessionMap);
+
+      await gWriteFile(token, existingFile?.id || null, remoteDB);
+      
+      const now = Date.now();
+      setLastSync(now);
+
+      showToast(newSessions.length > 0
+        ? `✅ تم رفع ${newSessions.length} تغيير`
+        : '✅ لا توجد تغييرات جديدة');
+    } catch(err){
+      console.error(err);
+      showToast('❌ فشل الرفع، تحقق من الاتصال');
+    }
+  });
+}
+
+async function driveImport(){
+  showToast('جاري تسجيل الدخول...');
+  gSignIn(async (token) => {
+    try {
+      const file = await gFindFile(token);
+      if(!file){ showToast('لا يوجد ملف محفوظ على Drive'); return; }
+
+      showToast('جاري الاستيراد...');
+      const remoteDB = await gReadFile(token, file.id);
+
+      if(!remoteDB.classes || !remoteDB.sessions) throw new Error('bad');
+
+      if(confirm('سيتم دمج البيانات من Drive مع البيانات المحلية. متابعة؟')){
+        // Merge sessions
+        const localMap = {};
+        DB.sessions.forEach(s => { localMap[s.id] = s; });
+        remoteDB.sessions.forEach(s => { localMap[s.id] = s; });
+        DB.sessions = Object.values(localMap);
+
+        // Merge classes
+        const classMap = {};
+        DB.classes.forEach(c => { classMap[c.id] = c; });
+        remoteDB.classes.forEach(c => { classMap[c.id] = c; });
+        DB.classes = Object.values(classMap);
+
+        saveDB();
+        setLastSync(Date.now());
+        nav({screen:'home'});
+        showToast('✅ تم الاستيراد من Drive');
+      }
+    } catch(err){
+      console.error(err);
+      showToast('❌ فشل الاستيراد، تحقق من الاتصال');
+    }
+  });
+}
 
 /* hidden file input for student-list import (xlsx/csv/txt) */
 const fileImportStudents = document.createElement('input');
