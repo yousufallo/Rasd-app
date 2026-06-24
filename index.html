@@ -3061,26 +3061,21 @@ async function gReadFile(token, fileId){
 
 async function gWriteFile(token, fileId, data){
   const body = JSON.stringify(data);
-  const url = fileId
-    ? `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`
-    : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`;
+  const metadata = { name: GDRIVE_FILE_NAME, mimeType: 'application/json' };
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+  form.append('file', new Blob([body], { type: 'application/json' }));
 
   if(fileId){
-    await fetch(url, {
-      method: 'PATCH',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body
-    });
+    await fetch(
+      `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`,
+      { method: 'PATCH', headers: { Authorization: `Bearer ${token}` }, body: form }
+    );
   } else {
-    const metadata = { name: GDRIVE_FILE_NAME, mimeType: 'application/json' };
-    const form = new FormData();
-    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-    form.append('file', new Blob([body], { type: 'application/json' }));
-    await fetch(url, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: form
-    });
+    await fetch(
+      `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`,
+      { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form }
+    );
   }
 }
 
