@@ -2689,17 +2689,7 @@ function handleAction(action, el, e){
     case 'viewHistory': nav({screen:'history', classId:el.getAttribute('data-id')}); break;
     case 'openSessionDate': nav({screen:'session', classId:el.getAttribute('data-id'), date:el.getAttribute('data-date'), seq:parseInt(el.getAttribute('data-seq'))||1}); break;
 
-    case 'exportAll': {
-      openSheet(`
-        <div class="sheet-handle"></div>
-        <div class="sheet-title">تصدير نسخة احتياطية</div>
-        <button class="btn btn-primary btn-block" style="margin-bottom:10px;" data-action="driveSync">🔄 تحديث النسخة الاحتياطية</button>
-        <div style="font-size:12px; color:var(--slate); opacity:.7; margin-bottom:14px; text-align:center;">يرفع فقط التغييرات الجديدة ويضيفها للنسخة الموجودة</div>
-        <button class="btn btn-ghost btn-block" data-action="driveReplace">♻️ استبدال النسخة الاحتياطية</button>
-        <div style="font-size:12px; color:var(--slate); opacity:.7; margin-top:6px; text-align:center;">يحذف النسخة القديمة ويستبدلها بكل البيانات الحالية</div>
-      `);
-      break;
-    }
+    case 'exportAll': driveReplaceAll(); break;
     case 'driveSync': closeSheet(); driveExport(); break;
     case 'driveReplace': closeSheet(); driveReplaceAll(); break;
     case 'importBackup': driveImport(); break;
