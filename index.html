@@ -2690,9 +2690,12 @@ function handleAction(action, el, e){
     case 'openSessionDate': nav({screen:'session', classId:el.getAttribute('data-id'), date:el.getAttribute('data-date'), seq:parseInt(el.getAttribute('data-seq'))||1}); break;
 
     case 'exportAll': driveReplaceAll(); break;
+    case 'confirmDriveExport': confirmDriveExport(); break;
     case 'driveSync': closeSheet(); driveExport(); break;
     case 'driveReplace': closeSheet(); driveReplaceAll(); break;
     case 'importBackup': driveImport(); break;
+    case 'confirmDriveImport': confirmDriveImport(); break;
+    case 'closeSheet': closeSheet(); break;
 
     case 'triggerImport': {
       const fi = document.getElementById('fileImportStudents');
@@ -3149,42 +3152,59 @@ function importBackupFile(file){
   reader.readAsText(file);
 }
 
-async function driveReplaceAll(){
+function driveReplaceAll(){
+  const options = getAcademicYearOptions();
+  const currentYear = getAcademicYear();
+  const optionsHtml = options.map(y =>
+    `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y}</option>`
+  ).join('');
+
+  openSheet(`
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">تصدير نسخة احتياطية</div>
+    <div class="field">
+      <label>السنة الدراسية</label>
+      <select id="selAcademicYear" style="width:100%; padding:10px; border-radius:10px; border:1px solid var(--border); font-size:15px; font-family:inherit; background:#fff;">
+        ${optionsHtml}
+      </select>
+    </div>
+    <div style="font-size:12px; color:var(--slate); opacity:.7; margin-bottom:14px;">سيتم حفظ نسخة احتياطية مستقلة لهذه السنة الدراسية</div>
+    <button class="btn btn-primary btn-block" data-action="confirmDriveExport">تصدير</button>
+  `);
+}
+
+async function confirmDriveExport(){
+  const year = document.getElementById('selAcademicYear').value;
+  const fileName = driveFileName(year);
+  closeSheet();
   showToast('جاري تسجيل الدخول...');
   gSignIn(async (token) => {
     try {
-      if(!confirm('سيتم استبدال النسخة الاحتياطية على Drive بكل البيانات الحالية. متابعة؟')) return;
-      showToast('جاري الاستبدال...');
-      // Delete ALL files with same name
-      const res = await fetch(
-        `https://www.googleapis.com/drive/v3/files?q=name='${GDRIVE_FILE_NAME}'+and+trashed=false&fields=files(id)`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const data = await res.json();
-      if(data.files && data.files.length > 0){
-        await Promise.all(data.files.map(f =>
-          fetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${token}` }
-          })
-        ));
+      showToast('جاري التصدير...');
+      const existingFile = await gFindFile(token, fileName);
+      if(existingFile){
+        await fetch(`https://www.googleapis.com/drive/v3/files/${existingFile.id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` }
+        });
       }
-      // Create fresh file with all current data
       const fullDB = {
         classes: DB.classes,
         sessions: DB.sessions,
         teacherName: loadTeacherName(),
-        teacherEmail: loadTeacherEmail()
+        teacherEmail: loadTeacherEmail(),
+        academicYear: year
       };
-      await gWriteFile(token, null, fullDB);
+      await gWriteFile(token, null, fullDB, fileName);
       setLastSync(Date.now());
-      showToast('✅ تم استبدال النسخة الاحتياطية');
+      showToast(`✅ تم تصدير نسخة ${year}`);
     } catch(err){
       console.error(err);
-      showToast('❌ فشل الاستبدال، تحقق من الاتصال');
+      showToast('❌ فشل التصدير، تحقق من الاتصال');
     }
   });
 }
+
 const fileImport = document.createElement('input');
 fileImport.type='file'; fileImport.accept='application/json'; fileImport.id='fileImport';
 fileImport.style.display='none';
@@ -3196,13 +3216,38 @@ document.body.appendChild(fileImport);
    ============================================================ */
 const GDRIVE_CLIENT_ID = '659728994809-026peo4qlvr18pskbikeufbv8rp23s27.apps.googleusercontent.com';
 const GDRIVE_SCOPES = 'https://www.googleapis.com/auth/drive.file';
-const GDRIVE_FILE_NAME = 'rasd-backup.json';
 const GDRIVE_LAST_SYNC_KEY = 'rasd_last_sync';
-
-let gAccessToken = null;
 
 function getLastSync(){ return parseFloat(localStorage.getItem(GDRIVE_LAST_SYNC_KEY)||'0'); }
 function setLastSync(ts){ localStorage.setItem(GDRIVE_LAST_SYNC_KEY, String(ts)); }
+
+function hasUnsyncedChanges(){
+  const lastSync = getLastSync();
+  if(!lastSync) return true;
+  return DB.sessions.some(s => (s.updatedAt || s.createdAt || 0) > lastSync);
+}
+
+let gAccessToken = null;
+
+function getAcademicYear(date){
+  const d = date || new Date();
+  const m = d.getMonth() + 1; // 1-12
+  const y = d.getFullYear();
+  return m >= 9 ? `${y}-${y+1}` : `${y-1}-${y}`;
+}
+
+function getAcademicYearOptions(){
+  const current = getAcademicYear();
+  const [startY] = current.split('-').map(Number);
+  const options = [];
+  for(let i = 1; i >= -2; i--){
+    const y = startY + i;
+    options.push(`${y}-${y+1}`);
+  }
+  return options;
+}
+
+function driveFileName(year){ return `rasd-${year}.json`; }
 
 function gSignIn(callback){
   if(gAccessToken){ callback(gAccessToken); return; }
@@ -3218,13 +3263,22 @@ function gSignIn(callback){
   client.requestAccessToken();
 }
 
-async function gFindFile(token){
+async function gFindFile(token, fileName){
   const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=name='${GDRIVE_FILE_NAME}'+and+trashed=false&fields=files(id,name,modifiedTime)`,
+    `https://www.googleapis.com/drive/v3/files?q=name='${fileName}'+and+trashed=false&fields=files(id,name,modifiedTime)`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
   const data = await res.json();
   return data.files && data.files.length > 0 ? data.files[0] : null;
+}
+
+async function gListBackups(token){
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=name+contains+'rasd-'+and+trashed=false&fields=files(id,name,modifiedTime)`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const data = await res.json();
+  return (data.files || []).filter(f => /^rasd-\d{4}-\d{4}\.json$/.test(f.name));
 }
 
 async function gReadFile(token, fileId){
@@ -3235,9 +3289,9 @@ async function gReadFile(token, fileId){
   return await res.json();
 }
 
-async function gWriteFile(token, fileId, data){
+async function gWriteFile(token, fileId, data, fileName){
   const body = JSON.stringify(data);
-  const metadata = { name: GDRIVE_FILE_NAME, mimeType: 'application/json' };
+  const metadata = { name: fileName, mimeType: 'application/json' };
   const form = new FormData();
   form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
   form.append('file', new Blob([body], { type: 'application/json' }));
@@ -3306,24 +3360,70 @@ async function driveImport(){
   showToast('جاري تسجيل الدخول...');
   gSignIn(async (token) => {
     try {
-      const file = await gFindFile(token);
-      if(!file){ showToast('لا يوجد ملف محفوظ على Drive'); return; }
+      const files = await gListBackups(token);
+      if(!files.length){ showToast('لا يوجد نسخ احتياطية على Drive'); return; }
 
-      showToast('جاري الاستيراد...');
-      const remoteDB = await gReadFile(token, file.id);
+      // Sort by year descending
+      files.sort((a, b) => b.name.localeCompare(a.name));
 
+      const optionsHtml = files.map(f => {
+        const year = f.name.replace('rasd-', '').replace('.json', '');
+        return `<option value="${f.id}">${year}</option>`;
+      }).join('');
+
+      const warningHtml = hasUnsyncedChanges() ? `
+        <div style="background:#fff3cd; border:2px solid #f0ad4e; border-radius:12px; padding:12px; margin-bottom:14px;">
+          <div style="font-size:14px; font-weight:700; color:#856404;">⚠️ حتى لا تفقد البيانات الحالية قم بتصدير نسخة احتياطية لها أولاً</div>
+        </div>
+      ` : '';
+
+      const btnHtml = hasUnsyncedChanges() ? `
+        <div style="display:flex; gap:10px; margin-top:4px;">
+          <button class="btn btn-ghost" style="flex:1;" data-action="closeSheet">إلغاء</button>
+          <button class="btn btn-primary" style="flex:1;" data-action="confirmDriveImport">متابعة على أية حال</button>
+        </div>
+      ` : `<button class="btn btn-primary btn-block" data-action="confirmDriveImport">استيراد</button>`;
+
+      openSheet(`
+        <div class="sheet-handle"></div>
+        <div class="sheet-title">استيراد نسخة احتياطية</div>
+        ${warningHtml}
+        <div class="field">
+          <label>اختر السنة الدراسية</label>
+          <select id="selImportYear" style="width:100%; padding:10px; border-radius:10px; border:1px solid var(--border); font-size:15px; font-family:inherit; background:#fff;">
+            ${optionsHtml}
+          </select>
+        </div>
+        ${btnHtml}
+      `);
+
+      window._driveImportFiles = files;
+
+    } catch(err){
+      console.error(err);
+      showToast('❌ فشل الاتصال، تحقق من الإنترنت');
+    }
+  });
+}
+
+async function confirmDriveImport(){
+  const fileId = document.getElementById('selImportYear').value;
+  const fileName = (window._driveImportFiles || []).find(f => f.id === fileId)?.name || '';
+  const year = fileName.replace('rasd-', '').replace('.json', '');
+  closeSheet();
+  showToast('جاري الاستيراد...');
+  gSignIn(async (token) => {
+    try {
+      const remoteDB = await gReadFile(token, fileId);
       if(!remoteDB.classes || !remoteDB.sessions) throw new Error('bad');
-
-      if(confirm('سيتم استبدال البيانات المحلية بالنسخة الاحتياطية من Drive. متابعة؟')){
-        localStorage.removeItem(DB_KEY);
-        DB = { classes: remoteDB.classes, sessions: remoteDB.sessions };
-        saveDB();
-        if(remoteDB.teacherName) saveTeacherName(remoteDB.teacherName);
-        if(remoteDB.teacherEmail) saveTeacherEmail(remoteDB.teacherEmail);
-        setLastSync(Date.now());
-        nav({screen:'home'});
-        showToast('✅ تم الاستيراد من Drive');
-      }
+      localStorage.removeItem(DB_KEY);
+      DB = { classes: remoteDB.classes, sessions: remoteDB.sessions };
+      saveDB();
+      if(remoteDB.teacherName) saveTeacherName(remoteDB.teacherName);
+      if(remoteDB.teacherEmail) saveTeacherEmail(remoteDB.teacherEmail);
+      setLastSync(Date.now());
+      nav({screen:'home'});
+      showToast(`✅ تم استيراد نسخة ${year}`);
     } catch(err){
       console.error(err);
       showToast('❌ فشل الاستيراد، تحقق من الاتصال');
