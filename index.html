@@ -2720,12 +2720,14 @@ function handleAction(action, el, e){
     case 'confirmImport': {
       const c = DB.classes.find(x=>x.id===importState.classId);
       const finalNames = importState.names.map(n=>n.trim()).filter(Boolean);
-      finalNames.forEach(name => c.students.push({ id: uid(), name }));
+      const existingNames = c.students.map(s => s.name);
+      const newNames = finalNames.filter(name => !existingNames.includes(name));
+      const skipped = finalNames.length - newNames.length;
+      newNames.forEach(name => c.students.push({ id: uid(), name }));
       saveDB();
-      const count = finalNames.length;
       closeSheet();
       render();
-      showToast(`تمت إضافة ${count} طالب`);
+      showToast(`تمت إضافة ${newNames.length} طالب${skipped > 0 ? ` (تم تجاهل ${skipped} مكرر)` : ''}`);
       importState = null;
       break;
     }
