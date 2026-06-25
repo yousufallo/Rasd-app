@@ -227,8 +227,7 @@ html,body{
   padding:16px;
   margin-bottom:12px;
 }
-.class-card{
-  display:flex;
+.class-card{  display:flex;
   align-items:center;
   gap:14px;
   padding:16px;
@@ -241,6 +240,18 @@ html,body{
   transition:transform .08s;
 }
 .class-card:active{transform:scale(0.98);}
+.class-card.drag-over{border:2px dashed var(--primary); opacity:0.7;}
+.class-card.dragging{opacity:0.4; transform:scale(0.97);}
+.drag-handle{
+  font-size:18px;
+  color:var(--slate);
+  opacity:0.4;
+  cursor:grab;
+  padding:0 2px;
+  touch-action:none;
+  user-select:none;
+}
+.drag-handle:active{cursor:grabbing;}
 .report-btn{
   background:var(--cream-dim);
   border:none;
@@ -874,13 +885,14 @@ function render(){
     attachHandlers();
     return;
   }
-  if(route.screen === 'home') app.innerHTML = renderHome();
+  if(route.screen === 'home'){ app.innerHTML = renderHome(); }
   else if(route.screen === 'classStudents') app.innerHTML = renderClassStudents(route.classId);
   else if(route.screen === 'session') app.innerHTML = renderSession(route.classId, route.date, route.seq);
   else if(route.screen === 'studentProfile') app.innerHTML = renderStudentProfile(route.classId, route.studentId);
   else if(route.screen === 'history') app.innerHTML = renderClassHistory(route.classId);
   else if(route.screen === 'settings') app.innerHTML = renderSettings();
   attachHandlers();
+  if(route.screen === 'home') initDragSort();
 }
 
 setInterval(()=>{
@@ -901,12 +913,13 @@ function renderHome(){
         <div class="empty-text">أضف أول صف لتبدأ بمتابعة طلابك<br>خلال الحصص الصفية</div>
       </div>`;
   }else{
-    body = DB.classes.map((c,i)=>{
+    body = DB.classes.map((c,i)=>{\
       const count = c.students.length;
       const lastSession = DB.sessions.filter(s=>s.classId===c.id).sort((a,b)=>b.date.localeCompare(a.date))[0];
       const lastTxt = lastSession ? `آخر حصة: ${fmtFull(lastSession.date)}` : 'لا توجد حصص مسجلة';
       return `
-      <div class="class-card" data-action="openClass" data-id="${c.id}">
+      <div class="class-card" data-action="openClass" data-id="${c.id}" draggable="true">
+        <div class="drag-handle" data-nodrag="false">⠿</div>
         <div class="class-dot" style="background:${c.color}">${initials(c.name)}</div>
         <div class="class-info">
           <div class="class-name">${esc(c.name)}</div>
@@ -936,8 +949,84 @@ function renderHome(){
   `;
 }
 
-function bottomNav(active){
-  return `
+function initDragSort(){
+  const cards = [...document.querySelectorAll('.class-card[draggable]')];
+  if(!cards.length) return;
+  let dragSrc = null;
+
+  cards.forEach(card => {
+    // Desktop drag
+    card.addEventListener('dragstart', e => {
+      // Only allow drag from handle
+      if(!e.target.classList.contains('drag-handle')) { e.preventDefault(); return; }
+      dragSrc = card;
+      setTimeout(()=> card.classList.add('dragging'), 0);
+    });
+    card.addEventListener('dragend', () => card.classList.remove('dragging'));
+    card.addEventListener('dragover', e => { e.preventDefault(); card.classList.add('drag-over'); });
+    card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+    card.addEventListener('drop', e => {
+      e.preventDefault();
+      card.classList.remove('drag-over');
+      if(!dragSrc || dragSrc === card) return;
+      const fromId = dragSrc.getAttribute('data-id');
+      const toId = card.getAttribute('data-id');
+      const fromIdx = DB.classes.findIndex(c => c.id === fromId);
+      const toIdx = DB.classes.findIndex(c => c.id === toId);
+      if(fromIdx < 0 || toIdx < 0) return;
+      const [moved] = DB.classes.splice(fromIdx, 1);
+      DB.classes.splice(toIdx, 0, moved);
+      saveDB(); render();
+    });
+
+    // Touch drag
+    const handle = card.querySelector('.drag-handle');
+    if(!handle) return;
+    let touchDragging = false, ghost = null, startY = 0, origIdx = -1;
+
+    handle.addEventListener('touchstart', e => {
+      touchDragging = true;
+      dragSrc = card;
+      startY = e.touches[0].clientY;
+      origIdx = DB.classes.findIndex(c => c.id === card.getAttribute('data-id'));
+      card.classList.add('dragging');
+      e.preventDefault();
+    }, { passive: false });
+
+    handle.addEventListener('touchmove', e => {
+      if(!touchDragging) return;
+      e.preventDefault();
+      const touch = e.touches[0];
+      const el = document.elementFromPoint(touch.clientX, touch.clientY);
+      const target = el && el.closest('.class-card[draggable]');
+      document.querySelectorAll('.class-card').forEach(c => c.classList.remove('drag-over'));
+      if(target && target !== card) target.classList.add('drag-over');
+    }, { passive: false });
+
+    handle.addEventListener('touchend', e => {
+      if(!touchDragging) return;
+      touchDragging = false;
+      card.classList.remove('dragging');
+      const touch = e.changedTouches[0];
+      const el = document.elementFromPoint(touch.clientX, touch.clientY);
+      const target = el && el.closest('.class-card[draggable]');
+      document.querySelectorAll('.class-card').forEach(c => c.classList.remove('drag-over'));
+      if(target && target !== card){
+        const fromId = card.getAttribute('data-id');
+        const toId = target.getAttribute('data-id');
+        const fromIdx = DB.classes.findIndex(c => c.id === fromId);
+        const toIdx = DB.classes.findIndex(c => c.id === toId);
+        if(fromIdx >= 0 && toIdx >= 0){
+          const [moved] = DB.classes.splice(fromIdx, 1);
+          DB.classes.splice(toIdx, 0, moved);
+          saveDB(); render();
+        }
+      }
+    });
+  });
+}
+
+function bottomNav(active){  return `
   <div class="bottomnav">
     <div class="nav-item ${active==='home'?'active':''}" data-action="goHome">
       <div class="nav-ic">🏠</div>الصفوف
