@@ -1567,8 +1567,8 @@ function renderSettings(){
 
       <div class="section-label">النسخ الاحتياطي</div>
       <div class="card">
-        <button class="btn btn-primary btn-block" style="margin-bottom:10px;" data-action="exportAll">⇩ تصدير سجل (نسخة احتياطية)</button>
-        <button class="btn btn-ghost btn-block" data-action="importBackup">⇧ استيراد سجل</button>
+        <button class="btn btn-primary btn-block" style="margin-bottom:10px;" data-action="exportAll">⇩ تصدير نسخة احتياطية</button>
+        <button class="btn btn-ghost btn-block" data-action="importBackup">⇧ استيراد النسخة الاحتياطية</button>
         <div style="font-size:12px; color:#9a9384; margin-top:10px; line-height:1.7;">
           التصدير ينزّل ملف يحتوي كل صفوفك وطلابك وسجلات الحصص. الاستيراد يستبدل البيانات الحالية بالكامل بالملف المختار.
         </div>
@@ -2689,7 +2689,19 @@ function handleAction(action, el, e){
     case 'viewHistory': nav({screen:'history', classId:el.getAttribute('data-id')}); break;
     case 'openSessionDate': nav({screen:'session', classId:el.getAttribute('data-id'), date:el.getAttribute('data-date'), seq:parseInt(el.getAttribute('data-seq'))||1}); break;
 
-    case 'exportAll': driveExport(); break;
+    case 'exportAll': {
+      openSheet(`
+        <div class="sheet-handle"></div>
+        <div class="sheet-title">تصدير نسخة احتياطية</div>
+        <button class="btn btn-primary btn-block" style="margin-bottom:10px;" data-action="driveSync">🔄 تحديث النسخة الاحتياطية</button>
+        <div style="font-size:12px; color:var(--slate); opacity:.7; margin-bottom:14px; text-align:center;">يرفع فقط التغييرات الجديدة ويضيفها للنسخة الموجودة</div>
+        <button class="btn btn-ghost btn-block" data-action="driveReplace">♻️ استبدال النسخة الاحتياطية</button>
+        <div style="font-size:12px; color:var(--slate); opacity:.7; margin-top:6px; text-align:center;">يحذف النسخة القديمة ويستبدلها بكل البيانات الحالية</div>
+      `);
+      break;
+    }
+    case 'driveSync': closeSheet(); driveExport(); break;
+    case 'driveReplace': closeSheet(); driveReplaceAll(); break;
     case 'importBackup': driveImport(); break;
 
     case 'triggerImport': {
@@ -3145,7 +3157,24 @@ function importBackupFile(file){
   reader.readAsText(file);
 }
 
-/* hidden file input for import */
+async function driveReplaceAll(){
+  showToast('جاري تسجيل الدخول...');
+  gSignIn(async (token) => {
+    try {
+      if(!confirm('سيتم استبدال النسخة الاحتياطية على Drive بكل البيانات الحالية. متابعة؟')) return;
+      showToast('جاري الاستبدال...');
+      const existingFile = await gFindFile(token);
+      const fullDB = { classes: DB.classes, sessions: DB.sessions };
+      await gWriteFile(token, existingFile?.id || null, fullDB);
+      const now = Date.now();
+      setLastSync(now);
+      showToast('✅ تم استبدال النسخة الاحتياطية');
+    } catch(err){
+      console.error(err);
+      showToast('❌ فشل الاستبدال، تحقق من الاتصال');
+    }
+  });
+}
 const fileImport = document.createElement('input');
 fileImport.type='file'; fileImport.accept='application/json'; fileImport.id='fileImport';
 fileImport.style.display='none';
