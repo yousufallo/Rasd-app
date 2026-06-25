@@ -913,7 +913,7 @@ function renderHome(){
         <div class="empty-text">أضف أول صف لتبدأ بمتابعة طلابك<br>خلال الحصص الصفية</div>
       </div>`;
   }else{
-    body = DB.classes.map((c,i)=>{\
+    body = DB.classes.map((c,i)=>{
       const count = c.students.length;
       const lastSession = DB.sessions.filter(s=>s.classId===c.id).sort((a,b)=>b.date.localeCompare(a.date))[0];
       const lastTxt = lastSession ? `آخر حصة: ${fmtFull(lastSession.date)}` : 'لا توجد حصص مسجلة';
@@ -950,78 +950,121 @@ function renderHome(){
 }
 
 function initDragSort(){
+  const container = document.querySelector('.screen');
   const cards = [...document.querySelectorAll('.class-card[draggable]')];
   if(!cards.length) return;
-  let dragSrc = null;
+
+  let dragging = null, ghost = null, offsetY = 0, lastTarget = null;
+
+  function getCardId(el){ return el && el.closest('.class-card') && el.closest('.class-card').getAttribute('data-id'); }
+
+  function createGhost(card){
+    const rect = card.getBoundingClientRect();
+    const g = card.cloneNode(true);
+    g.style.cssText = `
+      position:fixed; left:${rect.left}px; top:${rect.top}px;
+      width:${rect.width}px; height:${rect.height}px;
+      margin:0; z-index:9999; pointer-events:none;
+      opacity:0.92; box-shadow:0 8px 32px rgba(0,0,0,0.18);
+      transform:scale(1.03); transition:box-shadow .15s;
+      border-radius:18px;
+    `;
+    document.body.appendChild(g);
+    return g;
+  }
+
+  function moveGhost(clientY){
+    if(!ghost) return;
+    ghost.style.top = (clientY - offsetY) + 'px';
+  }
+
+  function getTargetCard(clientY){
+    return cards.find(c => {
+      if(c === dragging) return false;
+      const r = c.getBoundingClientRect();
+      return clientY >= r.top && clientY <= r.bottom;
+    }) || null;
+  }
+
+  function reorder(fromId, toId){
+    const fromIdx = DB.classes.findIndex(c => c.id === fromId);
+    const toIdx   = DB.classes.findIndex(c => c.id === toId);
+    if(fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
+    const [moved] = DB.classes.splice(fromIdx, 1);
+    DB.classes.splice(toIdx, 0, moved);
+    saveDB(); render();
+  }
+
+  function cleanup(){
+    if(ghost){ ghost.remove(); ghost = null; }
+    cards.forEach(c => { c.classList.remove('dragging','drag-over'); });
+    dragging = null; lastTarget = null;
+  }
 
   cards.forEach(card => {
-    // Desktop drag
-    card.addEventListener('dragstart', e => {
-      // Only allow drag from handle
-      if(!e.target.classList.contains('drag-handle')) { e.preventDefault(); return; }
-      dragSrc = card;
-      setTimeout(()=> card.classList.add('dragging'), 0);
-    });
-    card.addEventListener('dragend', () => card.classList.remove('dragging'));
-    card.addEventListener('dragover', e => { e.preventDefault(); card.classList.add('drag-over'); });
-    card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
-    card.addEventListener('drop', e => {
-      e.preventDefault();
-      card.classList.remove('drag-over');
-      if(!dragSrc || dragSrc === card) return;
-      const fromId = dragSrc.getAttribute('data-id');
-      const toId = card.getAttribute('data-id');
-      const fromIdx = DB.classes.findIndex(c => c.id === fromId);
-      const toIdx = DB.classes.findIndex(c => c.id === toId);
-      if(fromIdx < 0 || toIdx < 0) return;
-      const [moved] = DB.classes.splice(fromIdx, 1);
-      DB.classes.splice(toIdx, 0, moved);
-      saveDB(); render();
-    });
-
-    // Touch drag
     const handle = card.querySelector('.drag-handle');
     if(!handle) return;
-    let touchDragging = false, ghost = null, startY = 0, origIdx = -1;
 
+    /* ── Touch ── */
     handle.addEventListener('touchstart', e => {
-      touchDragging = true;
-      dragSrc = card;
-      startY = e.touches[0].clientY;
-      origIdx = DB.classes.findIndex(c => c.id === card.getAttribute('data-id'));
-      card.classList.add('dragging');
       e.preventDefault();
+      dragging = card;
+      const rect = card.getBoundingClientRect();
+      offsetY = e.touches[0].clientY - rect.top;
+      ghost = createGhost(card);
+      card.classList.add('dragging');
+      if(navigator.vibrate) navigator.vibrate(18);
     }, { passive: false });
 
     handle.addEventListener('touchmove', e => {
-      if(!touchDragging) return;
+      if(!dragging) return;
       e.preventDefault();
-      const touch = e.touches[0];
-      const el = document.elementFromPoint(touch.clientX, touch.clientY);
-      const target = el && el.closest('.class-card[draggable]');
-      document.querySelectorAll('.class-card').forEach(c => c.classList.remove('drag-over'));
-      if(target && target !== card) target.classList.add('drag-over');
+      const clientY = e.touches[0].clientY;
+      moveGhost(clientY);
+      const target = getTargetCard(clientY);
+      if(target !== lastTarget){
+        cards.forEach(c => c.classList.remove('drag-over'));
+        if(target) target.classList.add('drag-over');
+        lastTarget = target;
+      }
     }, { passive: false });
 
     handle.addEventListener('touchend', e => {
-      if(!touchDragging) return;
-      touchDragging = false;
-      card.classList.remove('dragging');
-      const touch = e.changedTouches[0];
-      const el = document.elementFromPoint(touch.clientX, touch.clientY);
-      const target = el && el.closest('.class-card[draggable]');
-      document.querySelectorAll('.class-card').forEach(c => c.classList.remove('drag-over'));
-      if(target && target !== card){
-        const fromId = card.getAttribute('data-id');
-        const toId = target.getAttribute('data-id');
-        const fromIdx = DB.classes.findIndex(c => c.id === fromId);
-        const toIdx = DB.classes.findIndex(c => c.id === toId);
-        if(fromIdx >= 0 && toIdx >= 0){
-          const [moved] = DB.classes.splice(fromIdx, 1);
-          DB.classes.splice(toIdx, 0, moved);
-          saveDB(); render();
+      if(!dragging) return;
+      const fromId = dragging.getAttribute('data-id');
+      const toId   = lastTarget && lastTarget.getAttribute('data-id');
+      cleanup();
+      if(toId && fromId !== toId) reorder(fromId, toId);
+    });
+
+    /* ── Mouse ── */
+    handle.addEventListener('mousedown', e => {
+      e.preventDefault();
+      dragging = card;
+      const rect = card.getBoundingClientRect();
+      offsetY = e.clientY - rect.top;
+      ghost = createGhost(card);
+      card.classList.add('dragging');
+
+      function onMove(ev){
+        moveGhost(ev.clientY);
+        const target = getTargetCard(ev.clientY);
+        if(target !== lastTarget){
+          cards.forEach(c => c.classList.remove('drag-over'));
+          if(target) target.classList.add('drag-over');
+          lastTarget = target;
         }
       }
+      function onUp(){
+        const fromId = dragging.getAttribute('data-id');
+        const toId   = lastTarget && lastTarget.getAttribute('data-id');
+        cleanup();
+        if(toId && fromId !== toId) reorder(fromId, toId);
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      }
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
     });
   });
 }
@@ -2385,6 +2428,7 @@ function handleAction(action, el, e){
     case 'saveNewClass': {
       const name = document.getElementById('inpClassName').value.trim();
       if(!name){ showToast('اكتب اسم الصف'); return; }
+      if(DB.classes.some(c => c.name === name)){ showToast('يوجد صف بهذا الاسم مسبقاً'); return; }
       const sel = document.querySelector('.swatch.sel');
       const color = sel ? sel.getAttribute('data-color') : COLORS[0];
       DB.classes.push({ id:uid(), name, color, students:[] });
@@ -2400,6 +2444,7 @@ function handleAction(action, el, e){
       const c = DB.classes.find(x=>x.id===el.getAttribute('data-id'));
       const nm = document.getElementById('inpEditClassName').value.trim();
       if(!nm){ showToast('اكتب اسم الصف'); return; }
+      if(DB.classes.some(x => x.name === nm && x.id !== c.id)){ showToast('يوجد صف بهذا الاسم مسبقاً'); return; }
       const sel = document.querySelector('.swatch.sel');
       if(sel) c.color = sel.getAttribute('data-color');
       c.name = nm;
@@ -2435,12 +2480,12 @@ function handleAction(action, el, e){
       const name = document.getElementById('inpStudentName').value.trim();
       if(!name){ showToast('اكتب اسم الطالب'); return; }
       const c = DB.classes.find(x=>x.id===el.getAttribute('data-id'));
+      if(c.students.some(s => s.name === name)){ showToast('يوجد طالب بهذا الاسم في الصف'); return; }
       c.students.push({ id:uid(), name });
       saveDB();
       document.getElementById('inpStudentName').value='';
       document.getElementById('inpStudentName').focus();
-      render(); 
-      // reopen sheet for fast multi-add
+      render();
       sheetAddStudent(el.getAttribute('data-id'));
       showToast('تمت الإضافة');
       break;
@@ -2452,7 +2497,10 @@ function handleAction(action, el, e){
       const c = DB.classes.find(x=>x.id===el.getAttribute('data-cid'));
       const s = c.students.find(x=>x.id===el.getAttribute('data-sid'));
       const nm = prompt('اسم الطالب الجديد', s.name);
-      if(nm && nm.trim()){ s.name = nm.trim(); saveDB(); closeSheet(); render(); }
+      if(nm && nm.trim()){
+        if(c.students.some(x => x.name === nm.trim() && x.id !== s.id)){ showToast('يوجد طالب بهذا الاسم في الصف'); return; }
+        s.name = nm.trim(); saveDB(); closeSheet(); render();
+      }
       break;
     }
     case 'deleteStudent': {
