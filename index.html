@@ -3163,13 +3163,19 @@ async function driveReplaceAll(){
     try {
       if(!confirm('سيتم استبدال النسخة الاحتياطية على Drive بكل البيانات الحالية. متابعة؟')) return;
       showToast('جاري الاستبدال...');
-      // Delete old file if exists
-      const existingFile = await gFindFile(token);
-      if(existingFile){
-        await fetch(`https://www.googleapis.com/drive/v3/files/${existingFile.id}`, {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${token}` }
-        });
+      // Delete ALL files with same name
+      const res = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=name='${GDRIVE_FILE_NAME}'+and+trashed=false&fields=files(id)`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const data = await res.json();
+      if(data.files && data.files.length > 0){
+        await Promise.all(data.files.map(f =>
+          fetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` }
+          })
+        ));
       }
       // Create fresh file with all current data
       const fullDB = { classes: DB.classes, sessions: DB.sessions };
@@ -3311,19 +3317,9 @@ async function driveImport(){
 
       if(!remoteDB.classes || !remoteDB.sessions) throw new Error('bad');
 
-      if(confirm('سيتم دمج البيانات من Drive مع البيانات المحلية. متابعة؟')){
-        // Merge sessions
-        const localMap = {};
-        DB.sessions.forEach(s => { localMap[s.id] = s; });
-        remoteDB.sessions.forEach(s => { localMap[s.id] = s; });
-        DB.sessions = Object.values(localMap);
-
-        // Merge classes
-        const classMap = {};
-        DB.classes.forEach(c => { classMap[c.id] = c; });
-        remoteDB.classes.forEach(c => { classMap[c.id] = c; });
-        DB.classes = Object.values(classMap);
-
+      if(confirm('سيتم استبدال البيانات المحلية بالنسخة الاحتياطية من Drive. متابعة؟')){
+        DB.classes = remoteDB.classes;
+        DB.sessions = remoteDB.sessions;
         saveDB();
         setLastSync(Date.now());
         nav({screen:'home'});
