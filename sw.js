@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sajjeli-cache-v1';
+const CACHE_NAME = 'sajjeli-cache-v2';
 const ASSETS = [
   './index.html',
   './manifest.json',
@@ -25,16 +25,18 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
+
   event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached;
-      return fetch(req)
-        .then((res) => {
-          const resClone = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone));
-          return res;
-        })
-        .catch(() => caches.match('./index.html'));
-    })
+    fetch(req)
+      .then((res) => {
+        // Save fresh copy in cache
+        const resClone = res.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone));
+        return res;
+      })
+      .catch(() => {
+        // Offline: serve from cache
+        return caches.match(req).then((cached) => cached || caches.match('./index.html'));
+      })
   );
 });
