@@ -3318,8 +3318,7 @@ async function driveImport(){
       if(!remoteDB.classes || !remoteDB.sessions) throw new Error('bad');
 
       if(confirm('سيتم استبدال البيانات المحلية بالنسخة الاحتياطية من Drive. متابعة؟')){
-        DB.classes = remoteDB.classes;
-        DB.sessions = remoteDB.sessions;
+        DB = { ...DB, classes: remoteDB.classes, sessions: remoteDB.sessions };
         saveDB();
         setLastSync(Date.now());
         nav({screen:'home'});
