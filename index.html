@@ -3168,7 +3168,12 @@ async function driveReplaceAll(){
         ));
       }
       // Create fresh file with all current data
-      const fullDB = { classes: DB.classes, sessions: DB.sessions };
+      const fullDB = {
+        classes: DB.classes,
+        sessions: DB.sessions,
+        teacherName: loadTeacherName(),
+        teacherEmail: loadTeacherEmail()
+      };
       await gWriteFile(token, null, fullDB);
       setLastSync(Date.now());
       showToast('✅ تم استبدال النسخة الاحتياطية');
@@ -3311,6 +3316,8 @@ async function driveImport(){
         localStorage.removeItem(DB_KEY);
         DB = { classes: remoteDB.classes, sessions: remoteDB.sessions };
         saveDB();
+        if(remoteDB.teacherName) saveTeacherName(remoteDB.teacherName);
+        if(remoteDB.teacherEmail) saveTeacherEmail(remoteDB.teacherEmail);
         setLastSync(Date.now());
         nav({screen:'home'});
         showToast('✅ تم الاستيراد من Drive');
