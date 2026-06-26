@@ -973,13 +973,12 @@ function renderHome(){
   const isOnline = navigator.onLine;
   const yearSelectorHtml = buildYearSelector(isOnline);
 
-  // زر تجديد الاتصال بـ Google — يظهر فقط إذا انتهت الجلسة (لا يوجد توكن صالح بالذاكرة)
-  const needsReconnect = isOnline && !gAccessToken;
-  const reconnectHtml = needsReconnect ? `
-    <button class="btn btn-ghost btn-block" id="btnReconnectGoogle" data-action="reconnectGoogle"
+  // زر مزامنة Drive — يظهر دائماً، والضغط عليه بدون إنترنت يطلع رسالة تنبيه
+  const syncButtonHtml = `
+    <button class="btn btn-ghost btn-block" id="btnSyncDrive" data-action="syncDriveNow"
       style="margin-bottom:14px; font-size:13px; display:flex; align-items:center; justify-content:center; gap:6px;">
-      <span style="font-size:15px;">🔄</span> تجديد الاتصال بحساب Google
-    </button>` : '';
+      <span style="font-size:15px;">🔄</span> مزامنة البيانات مع Google Drive
+    </button>`;
 
   return `
     <div class="topbar topbar-brand-h" style="flex-wrap:wrap;">
@@ -992,7 +991,7 @@ function renderHome(){
     </div>
     <div class="screen">
       ${yearSelectorHtml}
-      ${reconnectHtml}
+      ${syncButtonHtml}
       <button class="btn btn-primary btn-block" style="margin-bottom:16px;" data-action="newClass">+ إضافة صف جديد</button>
       <div class="section-label">صفوفي</div>
       ${body}
@@ -1651,15 +1650,6 @@ function renderSettings(){
           </div>
         `}
         <div id="passUpdateMsg" style="font-size:12px; margin-top:8px; display:none;"></div>
-      </div>
-
-      <div class="section-label">النسخ الاحتياطي</div>
-      <div class="card">
-        <button class="btn btn-primary btn-block" style="margin-bottom:10px;" data-action="exportAll">⇩ تصدير نسخة احتياطية</button>
-        <button class="btn btn-ghost btn-block" data-action="importBackup">⇧ استيراد النسخة الاحتياطية</button>
-        <div style="font-size:12px; color:#9a9384; margin-top:10px; line-height:1.7;">
-          التصدير ينزّل ملف يحتوي كل صفوفك وطلابك وسجلات الحصص. الاستيراد يستبدل البيانات الحالية بالكامل بالملف المختار.
-        </div>
       </div>
 
       <div class="section-label">السنة الدراسية</div>
@@ -2926,12 +2916,6 @@ function handleAction(action, el, e){
     case 'viewHistory': nav({screen:'history', classId:el.getAttribute('data-id')}); break;
     case 'openSessionDate': nav({screen:'session', classId:el.getAttribute('data-id'), date:el.getAttribute('data-date'), seq:parseInt(el.getAttribute('data-seq'))||1}); break;
 
-    case 'exportAll': driveReplaceAll(); break;
-    case 'confirmDriveExport': confirmDriveExport(); break;
-    case 'driveSync': closeSheet(); driveExport(); break;
-    case 'driveReplace': closeSheet(); driveReplaceAll(); break;
-    case 'importBackup': driveImport(); break;
-    case 'confirmDriveImport': confirmDriveImport(); break;
     case 'closeSheet': closeSheet(); break;
 
     case 'triggerImport': {
@@ -3028,21 +3012,9 @@ function handleAction(action, el, e){
       break;
     }
 
-    case 'reconnectGoogle': {
-      if(!navigator.onLine){ showToast('🔌 يلزم إنترنت للاتصال بـ Google'); break; }
-      showToast('جاري الاتصال...');
-      gSignIn(async (token) => {
-        try {
-          const files = await gListBackups(token);
-          files.sort((a,b)=>b.name.localeCompare(a.name));
-          window._driveYearsList = files.map(f=>f.name.replace('rasd-','').replace('.json',''));
-          showToast('✅ تم الاتصال بـ Google Drive');
-          if(route.screen === 'home') render();
-        } catch(err){
-          console.error(err);
-          showToast('❌ فشل الاتصال بـ Drive');
-        }
-      });
+    case 'syncDriveNow': {
+      if(!navigator.onLine){ showToast('🔌 يلزم إنترنت للمزامنة مع Drive'); break; }
+      driveExport();
       break;
     }
   }
@@ -3625,6 +3597,8 @@ async function driveExport(){
     try {
       showToast('جاري الرفع...');
       const lastSync = getLastSync();
+      const year = currentOpenYear || getAcademicYear();
+      const fileName = driveFileName(year);
 
       // Get new/changed sessions since last sync
       const newSessions = DB.sessions.filter(s => {
@@ -3632,8 +3606,8 @@ async function driveExport(){
         return ts > lastSync;
       });
 
-      // Find existing file
-      const existingFile = await gFindFile(token);
+      // Find existing file for the current academic year
+      const existingFile = await gFindFile(token, fileName);
       let remoteDB = { classes: [], sessions: [] };
 
       if(existingFile){
@@ -3651,7 +3625,7 @@ async function driveExport(){
       newSessions.forEach(s => { sessionMap[s.id] = s; });
       remoteDB.sessions = Object.values(sessionMap);
 
-      await gWriteFile(token, existingFile?.id || null, remoteDB);
+      await gWriteFile(token, existingFile?.id || null, remoteDB, fileName);
       
       const now = Date.now();
       setLastSync(now);
