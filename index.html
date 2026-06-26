@@ -973,6 +973,14 @@ function renderHome(){
   const isOnline = navigator.onLine;
   const yearSelectorHtml = buildYearSelector(isOnline);
 
+  // زر تجديد الاتصال بـ Google — يظهر فقط إذا انتهت الجلسة (لا يوجد توكن صالح بالذاكرة)
+  const needsReconnect = isOnline && !gAccessToken;
+  const reconnectHtml = needsReconnect ? `
+    <button class="btn btn-ghost btn-block" id="btnReconnectGoogle" data-action="reconnectGoogle"
+      style="margin-bottom:14px; font-size:13px; display:flex; align-items:center; justify-content:center; gap:6px;">
+      <span style="font-size:15px;">🔄</span> تجديد الاتصال بحساب Google
+    </button>` : '';
+
   return `
     <div class="topbar topbar-brand-h" style="flex-wrap:wrap;">
       <img src="${LOGO_CIRCLE}" class="topbar-logo-circle" alt="رصد">
@@ -984,6 +992,7 @@ function renderHome(){
     </div>
     <div class="screen">
       ${yearSelectorHtml}
+      ${reconnectHtml}
       <button class="btn btn-primary btn-block" style="margin-bottom:16px;" data-action="newClass">+ إضافة صف جديد</button>
       <div class="section-label">صفوفي</div>
       ${body}
@@ -3016,6 +3025,24 @@ function handleAction(action, el, e){
       if(!navigator.onLine){ showToast('🔌 يلزم إنترنت لإنشاء سنة جديدة'); break; }
       closeSheet();
       createNewAcademicYear();
+      break;
+    }
+
+    case 'reconnectGoogle': {
+      if(!navigator.onLine){ showToast('🔌 يلزم إنترنت للاتصال بـ Google'); break; }
+      showToast('جاري الاتصال...');
+      gSignIn(async (token) => {
+        try {
+          const files = await gListBackups(token);
+          files.sort((a,b)=>b.name.localeCompare(a.name));
+          window._driveYearsList = files.map(f=>f.name.replace('rasd-','').replace('.json',''));
+          showToast('✅ تم الاتصال بـ Google Drive');
+          if(route.screen === 'home') render();
+        } catch(err){
+          console.error(err);
+          showToast('❌ فشل الاتصال بـ Drive');
+        }
+      });
       break;
     }
   }
