@@ -1,15 +1,12 @@
-const CACHE_NAME = 'rasd-cache-v4';
+const CACHE_NAME = 'rasd-cache-v5';
 const ASSETS = [
   './index.html',
   './manifest.json',
   './icon-192.png',
-  './icon-512.png',
-  'https://accounts.google.com/gsi/client',
-  'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js',
-  'https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js'
+  './icon-512.png'
 ];
 
-// التثبيت: خزّن الملفات في الكاش (كل ملف منفصل، فشل ملف واحد ما يوقف الباقي)
+// التثبيت: خزّن الملفات المحلية في الكاش (كل ملف منفصل، فشل ملف واحد ما يوقف الباقي)
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) =>
@@ -35,14 +32,18 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
 
-  // طلبات Google Drive API / خطوط Google / Cloudflare CDN — شبكة مباشرة بدون كاش
-  // (Google Sign-In, Tesseract.js, EmailJS أصبحت ضمن ASSETS وتُخزَّن في الكاش)
+  // طلبات Google / EmailJS / Tesseract / خطوط / CDN — شبكة مباشرة بدون كاش
+  // (هذي الروابط خارجية ولها رؤوس CORS غير متوافقة مع التخزين، فتخزينها سبق وعطّل التطبيق)
   const url = new URL(req.url);
   const bypassHosts = [
+    'accounts.google.com',
     'googleapis.com',
     'fonts.googleapis.com',
     'fonts.gstatic.com',
-    'cdnjs.cloudflare.com'
+    'cdn.jsdelivr.net',
+    'cdnjs.cloudflare.com',
+    'emailjs.com',
+    'api.emailjs.com'
   ];
   if (bypassHosts.some(h => url.hostname.includes(h))) {
     return; // اتركها للمتصفح مباشرة
