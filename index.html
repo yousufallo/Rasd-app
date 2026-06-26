@@ -3831,7 +3831,8 @@ document.body.appendChild(fileImportImage);
 
 /* ===================== INIT ===================== */
 // إذا كانت هناك سنة مفتوحة مسبقًا (عودة للتطبيق)، حاول تحديث قائمة السنوات من Drive
-if(currentOpenYear && navigator.onLine){
+// فقط إذا كان فيه توكن صالح بالذاكرة (تسجيل دخول حديث بنفس الجلسة) — حتى لا تُحظر نافذة تسجيل الدخول تلقائياً
+if(currentOpenYear && navigator.onLine && gAccessToken){
   gSignIn((token)=>{
     gListBackups(token).then(files=>{
       files.sort((a,b)=>b.name.localeCompare(a.name));
