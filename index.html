@@ -1662,6 +1662,11 @@ function renderSettings(){
           🗓 إنشاء عام دراسي جديد
         </button>
         ${!navigator.onLine?`<div style="font-size:12px;color:#9a9384;margin-top:8px;">🔌 يلزم إنترنت لإنشاء سنة جديدة</div>`:`<div style="font-size:12px; color:#9a9384; margin-top:8px; line-height:1.7;">سيرفع البيانات الحالية على Drive وينشئ سنة جديدة فارغة.</div>`}
+        <div style="height:10px;"></div>
+        <button class="btn btn-danger btn-block" data-action="openDeleteAcademicYear" ${!navigator.onLine?'disabled':''}>
+          🗑 حذف عام دراسي
+        </button>
+        ${!navigator.onLine?`<div style="font-size:12px;color:#9a9384;margin-top:8px;">🔌 يلزم إنترنت لحذف سنة من Drive</div>`:`<div style="font-size:12px; color:#9a9384; margin-top:8px; line-height:1.7;">يحذف ملف السنة المختارة من Drive نهائياً ولا يمكن التراجع عنه.</div>`}
       </div>
 
       <div class="section-label">لون الخلفية</div>
@@ -1819,6 +1824,38 @@ function sheetDeleteAllData(){
       <input id="inpDeleteConfirm" data-action="checkDeleteConfirmCode" data-code="${code}" placeholder="اكتب الرقم هنا" inputmode="numeric" maxlength="3" style="text-align:center; font-size:22px; letter-spacing:4px;" autofocus>
     </div>
     <button class="btn btn-danger btn-block" id="btnConfirmDeleteAll" data-action="confirmDeleteAllData" data-code="${code}" disabled>🗑 حذف جميع البيانات نهائياً</button>
+  `);
+}
+
+function sheetDeleteAcademicYear(){
+  const years = window._driveYearsList || [];
+  if(!years.length){ showToast('لا توجد سنوات على Drive'); return; }
+
+  const code = String(Math.floor(100 + Math.random()*900));
+  const optionsHtml = years.map(y =>
+    `<option value="${esc(y)}">${esc(y)}</option>`
+  ).join('');
+
+  openSheet(`
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">🗑 حذف عام دراسي</div>
+    <div style="font-size:14px; color:var(--red); line-height:1.8; margin-bottom:14px;">
+      سيتم حذف ملف السنة المختارة من <b>Google Drive</b> نهائياً. هذا الإجراء لا يمكن التراجع عنه.
+    </div>
+    <div class="field">
+      <label>اختر السنة المراد حذفها</label>
+      <select id="selYearToDelete" style="width:100%; padding:10px; border-radius:10px; border:1px solid var(--line); font-size:15px; font-family:inherit; background:var(--cream); color:var(--slate);">
+        ${optionsHtml}
+      </select>
+    </div>
+    <div style="text-align:center; margin-bottom:14px;">
+      <div style="font-size:13px; color:var(--slate); opacity:.8; margin-bottom:6px;">للتأكيد، اكتب الرقم التالي:</div>
+      <div style="font-size:40px; font-weight:700; letter-spacing:6px; font-family:'Fraunces',serif; color:var(--red);">${code}</div>
+    </div>
+    <div class="field">
+      <input id="inpDeleteYearConfirm" data-action="checkDeleteYearCode" data-code="${code}" placeholder="اكتب الرقم هنا" inputmode="numeric" maxlength="3" style="text-align:center; font-size:22px; letter-spacing:4px;" autofocus>
+    </div>
+    <button class="btn btn-danger btn-block" id="btnConfirmDeleteYear" data-action="confirmDeleteAcademicYear" data-code="${code}" disabled>🗑 حذف السنة نهائياً من Drive</button>
   `);
 }
 
@@ -2314,6 +2351,15 @@ function attachHandlers(){
       return;
     }
 
+    if(action === 'checkDeleteYearCode'){
+      el.addEventListener('input', (e)=>{
+        const code = el.getAttribute('data-code');
+        const btn = document.getElementById('btnConfirmDeleteYear');
+        if(btn) btn.disabled = (e.target.value.trim() !== code);
+      });
+      return;
+    }
+
     el.addEventListener('click', (e)=>{
       if(action === 'openReport' || action === 'openStudentReport'){ e.stopPropagation(); }
       handleAction(action, el, e);
@@ -2560,6 +2606,52 @@ function handleAction(action, el, e){
       DB.sessions = [];
       saveDB(); closeSheet(); nav({screen:'home'});
       showToast('تم حذف جميع البيانات');
+      break;
+    }
+
+    case 'openDeleteAcademicYear': {
+      if(!navigator.onLine){ showToast('🔌 يلزم إنترنت لحذف سنة من Drive'); break; }
+      gSignIn(async (token)=>{
+        try {
+          const files = await gListBackups(token);
+          files.sort((a,b)=>b.name.localeCompare(a.name));
+          window._driveYearsList = files.map(f=>f.name.replace('rasd-','').replace('.json',''));
+          if(!files.length){ showToast('لا توجد سنوات على Drive'); return; }
+          sheetDeleteAcademicYear();
+        } catch(err){
+          showToast('❌ فشل الاتصال بـ Drive');
+        }
+      });
+      break;
+    }
+
+    case 'confirmDeleteAcademicYear': {
+      const inp = document.getElementById('inpDeleteYearConfirm');
+      const code = el.getAttribute('data-code');
+      if(!inp || inp.value.trim() !== code){ showToast('الرقم غير مطابق'); return; }
+      const yearToDelete = document.getElementById('selYearToDelete')?.value;
+      if(!yearToDelete){ showToast('اختر سنة أولاً'); return; }
+      closeSheet();
+      showToast('جاري الحذف من Drive...');
+      gSignIn(async (token)=>{
+        try {
+          const fileName = driveFileName(yearToDelete);
+          const file = await gFindFile(token, fileName);
+          if(!file){ showToast('❌ لم يُعثر على الملف على Drive'); return; }
+          await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          // حدّث القائمة المحلية
+          window._driveYearsList = (window._driveYearsList || []).filter(y => y !== yearToDelete);
+          // لو المحذوفة هي السنة المفتوحة حالياً — نبقى بها محلياً فقط
+          showToast(`✅ تم حذف سنة ${yearToDelete} من Drive`);
+          render();
+        } catch(err){
+          console.error(err);
+          showToast('❌ فشل الحذف، تحقق من الاتصال');
+        }
+      });
       break;
     }
 
