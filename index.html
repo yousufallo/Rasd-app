@@ -1028,7 +1028,7 @@ function buildYearSelector(isOnline){
     </div>`;
 }
 
-
+function initDragSort(){
   const container = document.querySelector('.screen');
   const cards = [...document.querySelectorAll('.class-card[draggable]')];
   if(!cards.length) return;
