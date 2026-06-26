@@ -1867,7 +1867,30 @@ function sheetClassMenu(classId){
     <div class="sheet-title">${esc(c.name)}</div>
     <button class="btn btn-ghost btn-block" style="margin-bottom:10px" data-action="renameClass" data-id="${classId}">✏️ تعديل اسم الصف ولونه</button>
     <button class="btn btn-ghost btn-block" style="margin-bottom:10px" data-action="addStudent" data-id="${classId}">+ إضافة طالب</button>
-    <button class="btn btn-danger btn-block" data-action="deleteClass" data-id="${classId}">🗑 حذف الصف نهائياً</button>
+    <button class="btn btn-danger btn-block" data-action="openDeleteClass" data-id="${classId}">🗑 حذف الصف نهائياً</button>
+  `);
+}
+
+function sheetDeleteClass(classId){
+  const c = DB.classes.find(x=>x.id===classId);
+  if(!c) return;
+  const code = String(Math.floor(100 + Math.random()*900));
+  const studentCount = c.students.length;
+  const sessionCount = DB.sessions.filter(s=>s.classId===classId).length;
+  openSheet(`
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">⚠️ حذف الصف نهائياً</div>
+    <div style="font-size:14px; color:var(--red); line-height:1.8; margin-bottom:14px;">
+      سيتم حذف صف <b>${esc(c.name)}</b> مع <b>${studentCount} طالب</b> و<b>${sessionCount} حصة مسجلة</b> نهائياً. هذا الإجراء لا يمكن التراجع عنه.
+    </div>
+    <div style="text-align:center; margin-bottom:14px;">
+      <div style="font-size:13px; color:var(--slate); opacity:.8; margin-bottom:6px;">للتأكيد، اكتب الرقم التالي:</div>
+      <div style="font-size:40px; font-weight:700; letter-spacing:6px; font-family:'Fraunces',serif; color:var(--slate);">${code}</div>
+    </div>
+    <div class="field">
+      <input id="inpDeleteClassConfirm" data-action="checkDeleteClassCode" data-code="${code}" placeholder="اكتب الرقم هنا" inputmode="numeric" maxlength="3" style="text-align:center; font-size:22px; letter-spacing:4px;" autofocus>
+    </div>
+    <button class="btn btn-danger btn-block" id="btnConfirmDeleteClass" data-action="deleteClass" data-id="${classId}" data-code="${code}" disabled>🗑 حذف الصف نهائياً</button>
   `);
 }
 
@@ -2360,6 +2383,15 @@ function attachHandlers(){
       return;
     }
 
+    if(action === 'checkDeleteClassCode'){
+      el.addEventListener('input', (e)=>{
+        const code = el.getAttribute('data-code');
+        const btn = document.getElementById('btnConfirmDeleteClass');
+        if(btn) btn.disabled = (e.target.value.trim() !== code);
+      });
+      return;
+    }
+
     el.addEventListener('click', (e)=>{
       if(action === 'openReport' || action === 'openStudentReport'){ e.stopPropagation(); }
       handleAction(action, el, e);
@@ -2655,14 +2687,19 @@ function handleAction(action, el, e){
       break;
     }
 
+    case 'openDeleteClass': sheetDeleteClass(el.getAttribute('data-id')); break;
     case 'deleteClass': {
-      if(confirm('حذف هذا الصف وكل بياناته نهائياً؟')){
-        const id = el.getAttribute('data-id');
-        DB.classes = DB.classes.filter(c=>c.id!==id);
-        DB.sessions = DB.sessions.filter(s=>s.classId!==id);
-        saveDB(); closeSheet(); nav({screen:'home'});
-        showToast('تم حذف الصف');
+      const id = el.getAttribute('data-id');
+      const code = el.getAttribute('data-code');
+      // لو جاء من الشيت الجديد — تحقق من الرقم
+      if(code){
+        const inp = document.getElementById('inpDeleteClassConfirm');
+        if(!inp || inp.value.trim() !== code){ showToast('الرقم غير مطابق'); return; }
       }
+      DB.classes = DB.classes.filter(c=>c.id!==id);
+      DB.sessions = DB.sessions.filter(s=>s.classId!==id);
+      saveDB(); closeSheet(); nav({screen:'home'});
+      showToast('تم حذف الصف');
       break;
     }
 
