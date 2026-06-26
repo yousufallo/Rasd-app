@@ -3595,6 +3595,14 @@ async function driveExport(){
   showToast('جاري تسجيل الدخول...');
   gSignIn(async (token) => {
     try {
+      // الخطوة 1: تحديث قائمة السنوات المنسدلة من Drive
+      showToast('جاري تحديث قائمة السنوات...');
+      const allFiles = await gListBackups(token);
+      allFiles.sort((a,b)=>b.name.localeCompare(a.name));
+      window._driveYearsList = allFiles.map(f=>f.name.replace('rasd-','').replace('.json',''));
+      if(route.screen === 'home') render();
+
+      // الخطوة 2: مزامنة بيانات السنة الحالية مع ملفها على Drive
       showToast('جاري الرفع...');
       const lastSync = getLastSync();
       const year = currentOpenYear || getAcademicYear();
