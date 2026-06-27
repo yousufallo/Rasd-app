@@ -3622,6 +3622,9 @@ async function driveExport(){
         remoteDB = await gReadFile(token, existingFile.id);
       }
 
+      // Check if classes changed (added/removed/renamed) compared to what's on Drive
+      const classesChanged = JSON.stringify(remoteDB.classes || []) !== JSON.stringify(DB.classes);
+
       // Merge: update existing sessions or add new ones
       const sessionMap = {};
       (remoteDB.sessions || []).forEach(s => { sessionMap[s.id] = s; });
@@ -3638,9 +3641,15 @@ async function driveExport(){
       const now = Date.now();
       setLastSync(now);
 
-      showToast(newSessions.length > 0
-        ? `✅ تم رفع ${newSessions.length} تغيير`
-        : '✅ لا توجد تغييرات جديدة');
+      if(newSessions.length > 0 && classesChanged){
+        showToast(`✅ تم رفع ${newSessions.length} تغيير وتحديث الصفوف`);
+      } else if(newSessions.length > 0){
+        showToast(`✅ تم رفع ${newSessions.length} تغيير`);
+      } else if(classesChanged){
+        showToast('✅ تم تحديث الصفوف على Drive');
+      } else {
+        showToast('✅ لا توجد تغييرات جديدة');
+      }
       if(route.screen === 'home') render();
     } catch(err){
       console.error(err);
