@@ -3600,9 +3600,6 @@ async function driveExport(){
       const allFiles = await gListBackups(token);
       allFiles.sort((a,b)=>b.name.localeCompare(a.name));
       window._driveYearsList = allFiles.map(f=>f.name.replace('rasd-','').replace('.json',''));
-      console.log('DEBUG driveYearsList:', window._driveYearsList);
-      showToast(`🔍 تم العثور على ${window._driveYearsList.length} سنة: ${window._driveYearsList.join(', ')}`);
-      await new Promise(r => setTimeout(r, 2500));
       if(route.screen === 'home') render();
 
       // الخطوة 2: مزامنة بيانات السنة الحالية مع ملفها على Drive
