@@ -2962,6 +2962,11 @@ function handleAction(action, el, e){
       if(msgEl) msgEl.textContent = 'جاري الاتصال...';
       gSignIn(async (token) => {
         try {
+          // إن لم يكن هناك بريد استرجاع محفوظ مسبقاً، عبّئه تلقائياً ببريد حساب Google المسجَّل دخوله
+          if(!loadTeacherEmail()){
+            const googleEmail = await gGetUserEmail(token);
+            if(googleEmail) saveTeacherEmail(googleEmail);
+          }
           if(msgEl) msgEl.textContent = 'جاري فحص Drive...';
           const files = await gListBackups(token);
           files.sort((a,b)=>b.name.localeCompare(a.name));
@@ -3497,7 +3502,7 @@ document.body.appendChild(fileImport);
    Google Drive Sync
    ============================================================ */
 const GDRIVE_CLIENT_ID = '659728994809-026peo4qlvr18pskbikeufbv8rp23s27.apps.googleusercontent.com';
-const GDRIVE_SCOPES = 'https://www.googleapis.com/auth/drive.file';
+const GDRIVE_SCOPES = 'https://www.googleapis.com/auth/drive.file email';
 const GDRIVE_LAST_SYNC_KEY = 'rasd_last_sync';
 
 function getLastSync(){ return parseFloat(localStorage.getItem(GDRIVE_LAST_SYNC_KEY)||'0'); }
@@ -3530,6 +3535,20 @@ function getAcademicYearOptions(){
 }
 
 function driveFileName(year){ return `rasd-${year}.json`; }
+
+async function gGetUserEmail(token){
+  try{
+    const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if(!res.ok) return '';
+    const data = await res.json();
+    return data.email || '';
+  } catch(err){
+    console.warn('gGetUserEmail failed', err);
+    return '';
+  }
+}
 
 function gSignIn(callback){
   if(gAccessToken){ callback(gAccessToken); return; }
